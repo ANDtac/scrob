@@ -5,6 +5,7 @@ from core import fidelity, fidelity_reconcile
 from db import get_db
 from dependencies import get_current_user
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import FileResponse
 from fidelity_schemas import CommitRequest, ImportManifest, SourceArtifactUpload, StatusReconciliation
 from models import (
     ImportBatch,
@@ -25,6 +26,17 @@ def private_response(response: Response):
 
 
 router = APIRouter(dependencies=[Depends(private_response)])
+
+
+class PrivateExportResponse(FileResponse):
+    """Remove the private snapshot even when delivery is cancelled."""
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            from pathlib import Path
+            Path(self.path).unlink(missing_ok=True)
 
 
 @router.get("/summary")
@@ -153,7 +165,7 @@ async def evidence(db: AsyncSession = Depends(get_db), user: User = Depends(get_
 
 
 @router.get("/export")
-async def export(response: Response, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    response.headers["Cache-Control"] = "no-store"
-    response.headers["Content-Disposition"] = 'attachment; filename="scrob-fidelity.json"'
-    return await fidelity.export_owner(db, user.id)
+async def export(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    filename = await fidelity.export_owner_file(db, user.id)
+    return PrivateExportResponse(filename, media_type="application/json", filename="scrob-fidelity.json",
+                                 headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})

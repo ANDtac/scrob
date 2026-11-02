@@ -5,9 +5,12 @@ Metadata identity resolution is local and explicit: this module does no HTTP I/O
 """
 import hashlib
 import json
+import os
+import tempfile
 from collections import Counter
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 
 from fastapi import HTTPException
 from fidelity_schemas import CommitRequest, ImportManifest, Occurred
@@ -27,7 +30,7 @@ from models import (
     User,
     WatchEvent,
 )
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import func, or_, select, text, union
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -428,6 +431,59 @@ async def export_owner(db, user_id):
             async with snapshot.begin():
                 await snapshot.execute(text("SET TRANSACTION READ ONLY"))
                 return await _export_owner_snapshot(snapshot, user_id)
+
+
+async def export_owner_file(db, user_id):
+    """Write one repeatable-read snapshot without materializing its full JSON.
+
+    The caller owns unlinking the private file after delivery. No SQL rows or
+    temporary pathname are returned to an unauthenticated client.
+    """
+    descriptor, filename = tempfile.mkstemp(prefix="scrob-fidelity-", suffix=".json")
+    destination = Path(filename)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            async with db.bind.connect() as connection:
+                await connection.execution_options(isolation_level="REPEATABLE READ")
+                async with AsyncSession(bind=connection) as snapshot:
+                    async with snapshot.begin():
+                        await snapshot.execute(text("SET TRANSACTION READ ONLY"))
+                        media_ids = union(*(select(model.media_id).where(model.user_id == user_id)
+                                            for model in (WatchEvent, Rating, SourceRecord)))
+                        queries = [(model.__tablename__, select(model).where(model.user_id == user_id).order_by(
+                            model.user_id if model is RatingPolicy else model.id))
+                            for model in (ImportBatch, SourceRecord, SourceRecordVersion, RatingRevision,
+                                          RatingPolicy, SourceArtifact, WatchEvent, Comment, Rating)]
+                        queries.extend([
+                            ("media", select(Media).where(Media.id.in_(media_ids)).order_by(Media.id)),
+                            ("shows", select(Show).where(Show.id.in_(select(Media.show_id).where(
+                                Media.id.in_(media_ids), Media.show_id.is_not(None)))).order_by(Show.id)),
+                        ])
+                        stream.write('{"schema_version":1,"format":"scrob-fidelity","user_id":')
+                        json.dump(user_id, stream)
+                        for name, query in queries:
+                            stream.write("," + json.dumps(name) + ":[")
+                            # Manifest, evidence and artifact rows contain arbitrary
+                            # source text. Never prefetch many large blobs together.
+                            batch_size = 1 if name in {
+                                "fidelity_import_batches", "fidelity_source_versions", "fidelity_source_artifacts"
+                            } else 100
+                            rows = await snapshot.stream_scalars(query.execution_options(yield_per=batch_size))
+                            try:
+                                first = True
+                                async for row in rows:
+                                    if not first:
+                                        stream.write(",")
+                                    json.dump(row_dict(row), stream, ensure_ascii=False, separators=(",", ":"))
+                                    first = False
+                            finally:
+                                await rows.close()
+                            stream.write("]")
+                        stream.write("}")
+        return destination
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
 
 
 async def _export_owner_snapshot(db, user_id):

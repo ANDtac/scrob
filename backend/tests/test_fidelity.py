@@ -339,3 +339,39 @@ async def test_authenticated_api_rejects_anonymous_and_other_owner():
             assert not any("token" in key for key in exported)
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_private_file_export_matches_snapshot_and_owns_cleanup():
+    import json
+    import stat
+
+    from routers.fidelity import PrivateExportResponse
+
+    engine, sessions = await setup()
+    filename = None
+    try:
+        async with sessions() as db:
+            await import_manifest(db, manifest(records=[record(),
+                {**record("review"), "kind": "review", "review": "Literal <script> text", "linked_event_external_id": "watch-1"}]))
+            expected = await fidelity.export_owner(db, 1)
+            filename = await fidelity.export_owner_file(db, 1)
+            assert stat.S_IMODE(filename.stat().st_mode) == 0o600
+            assert json.loads(filename.read_text()) == expected
+            other = await fidelity.export_owner_file(db, 2)
+            try:
+                assert not json.loads(other.read_text())["fidelity_source_versions"]
+            finally:
+                other.unlink()
+            response = PrivateExportResponse(filename)
+            async def fail_send(message):
+                raise RuntimeError("Synthetic delivery failure")
+            async def receive():
+                return {"type": "http.disconnect"}
+            with pytest.raises(RuntimeError, match="Synthetic delivery"):
+                await response({"type": "http", "method": "GET", "headers": []}, receive, fail_send)
+            assert not filename.exists()
+    finally:
+        if filename:
+            filename.unlink(missing_ok=True)
+        await engine.dispose()

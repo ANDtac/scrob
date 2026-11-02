@@ -4,6 +4,10 @@ This fork starts at Scrob v2.37.0, upstream commit
 `687156b8e5f79578650479124a645736049231ee`. It retains the existing application
 routes and adds authenticated `/imports/v1` APIs and the private `/imports` page.
 
+Large owner exports use one read-only repeatable snapshot streamed into a private
+0600 temporary file. Blob rows are fetched individually; response delivery removes
+the file on completion, failure, or cancellation. The JSON schema remains version1.
+
 ## Data and import contract
 
 `backend/fidelity_schemas.py` defines schema version1. A manifest is scoped to
