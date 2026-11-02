@@ -91,6 +91,7 @@ class EvidenceRecord(StrictModel):
     rating: Score | None = None
     season_number: int | None = Field(None, ge=0)
     episode_order: str | None = Field(None, max_length=40)
+    minimum_known_viewings: int | None = Field(None, ge=1, le=100, strict=True)
 
     @model_validator(mode="after")
     def valid_record(self):
@@ -102,6 +103,16 @@ class EvidenceRecord(StrictModel):
             raise ValueError("series watched assertions must be resolved to episodes")
         if self.match_event_id and not self.kind.startswith("watched"):
             raise ValueError("match_event_id is only valid on watched evidence")
+        if self.minimum_known_viewings is not None:
+            if self.kind != "watched_assertion" or self.match_event_id is not None:
+                raise ValueError("minimum count requires media-only watched assertion")
+            proof = self.payload.get("minimum_viewings_proof", {})
+            ids = proof.get("distinct_occurrence_ids", [])
+            if (proof.get("reviewed") is not True or not isinstance(ids, list)
+                    or len(ids) != self.minimum_known_viewings
+                    or any(not isinstance(value, str) or not value.strip() for value in ids)
+                    or len(set(ids)) != len(ids)):
+                raise ValueError("minimum count requires reviewed distinct occurrence identities")
         return self
 
 

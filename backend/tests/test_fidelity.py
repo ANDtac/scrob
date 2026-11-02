@@ -159,7 +159,7 @@ async def test_ownership_constraints_and_atomic_rollback():
 
 
 @pytest.mark.asyncio
-async def test_assertions_link_without_rewatch_and_rating_revisions_policy():
+async def test_assertions_preserve_media_evidence_without_rewatch_and_rating_revisions_policy():
     from models import Rating, RatingRevision
     engine, sessions = await setup()
     try:
@@ -168,6 +168,7 @@ async def test_assertions_link_without_rewatch_and_rating_revisions_policy():
             assertion = {**record("status"), "kind": "watched_assertion"}
             await import_manifest(db, manifest("assert", [assertion], source="tvtime", priority="letterboxd"))
             assert await db.scalar(select(func.count()).select_from(WatchEvent)) == 1
+            assert (await db.scalar(select(SourceRecord).where(SourceRecord.kind == "watched_assertion"))).watch_event_id is None
             score = {**record("rating", "date", "2020-01-01"), "kind": "rating", "rating": {"value": "4.5", "scale": "5"}}
             await import_manifest(db, manifest("lb", [score], source="letterboxd", priority="letterboxd"))
             other = {**record("rating", "instant", "2025-01-01T00:00:00Z"), "kind": "rating", "rating": {"value": "2", "scale": "10"}}
@@ -180,6 +181,38 @@ async def test_assertions_link_without_rewatch_and_rating_revisions_policy():
             assert await db.scalar(select(func.count()).select_from(RatingRevision)) == 3
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reviewed_minimum_count_tops_up_once_without_arbitrary_viewing_links():
+    engine, sessions = await setup()
+    try:
+        async with sessions() as db:
+            await import_manifest(db, manifest())
+            proof = {"minimum_viewings_proof": {"reviewed": True, "distinct_occurrence_ids": ["watch:1", "rewatch:2"]}}
+            assertion = {**record("status-1"), "kind": "watched_assertion", "minimum_known_viewings": 2, "payload": proof}
+            second = {**assertion, "external_id": "status-2"}
+            item = manifest("minimum", [assertion, second], source="tvtime")
+            result, request = await import_manifest(db, item)
+            assert result["receipt"]["assertion_projections_created"] == 1
+            assert await fidelity.commit(db, 1, request) == result
+            assert await db.scalar(select(func.count()).select_from(WatchEvent)) == 2
+            rows = (await db.scalars(select(SourceRecord).where(SourceRecord.kind == "watched_assertion"))).all()
+            assert len(rows) == 2 and all(row.watch_event_id is None for row in rows)
+            events = (await db.scalars(select(WatchEvent))).all()
+            assert all(row.watched_at is None for row in events)
+            # A lower bound cannot add its count again over existing viewings.
+            await import_manifest(db, manifest("lower-bound", [{**assertion, "external_id": "status-3"}], source="tvtime"))
+            assert await db.scalar(select(func.count()).select_from(WatchEvent)) == 2
+    finally:
+        await engine.dispose()
+
+
+def test_minimum_count_requires_reviewed_distinct_occurrences():
+    for count, proof in ((True, ["one"]), (2, ["one", "one"]), (2, ["one"]), (101, [str(i) for i in range(101)])):
+        with pytest.raises(ValueError):
+            manifest(records=[{**record(), "kind": "watched_assertion", "minimum_known_viewings": count,
+                               "payload": {"minimum_viewings_proof": {"reviewed": True, "distinct_occurrence_ids": proof}}}])
 
 
 def test_temporal_validation():

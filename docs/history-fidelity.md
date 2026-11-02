@@ -130,3 +130,13 @@ reconciliation, preventing migrated status snapshots from reappearing as new
 plays. New timestamps continue to import; unknown timestamps are not suppressed.
 The normal evidence/batch/export interfaces include all reconciliation data.
 No schema migration is needed beyond `hfidelity2`.
+
+Ordinary watched assertions retain media-only evidence when a completion already
+exists. They never attach themselves to the first or latest viewing. An optional
+`minimum_known_viewings` integer (1–100) requires reviewed, distinct source
+occurrence IDs in `payload.minimum_viewings_proof`; it creates only a deficit
+relative to existing completed rows, with unknown dates and no guessed viewing
+links. Multiple assertions and repeated imports cannot add the bound again.
+One batch may create at most 2,000 assertion projections. Explicit reviewed
+`match_event_id` remains available when actual individual-viewing equivalence
+is established, and cannot be combined with a minimum-count assertion.

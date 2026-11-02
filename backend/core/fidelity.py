@@ -27,7 +27,7 @@ from models import (
     User,
     WatchEvent,
 )
-from sqlalchemy import or_, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -44,6 +44,14 @@ def row_dict(row) -> dict:
             return str(value)
         return value.value if hasattr(value, "value") else value
     return {c.name: encode(getattr(row, c.name)) for c in row.__table__.columns}
+
+
+def record_evidence(record) -> dict:
+    encoded = record.model_dump(mode="json")
+    # Preserve hashes of schema1 manifests created before this optional field.
+    if encoded.get("minimum_known_viewings") is None:
+        encoded.pop("minimum_known_viewings", None)
+    return encoded
 
 
 def temporal_columns(occurred: Occurred) -> dict:
@@ -193,6 +201,7 @@ async def validate_matches(db, user_id, manifest):
 
 async def preview(db: AsyncSession, user_id: int, manifest: ImportManifest):
     encoded = manifest.model_dump(mode="json")
+    encoded["records"] = [record_evidence(record) for record in manifest.records]
     if len(json.dumps(encoded).encode()) > 20 * 1024 * 1024:
         raise HTTPException(413, "Manifest exceeds 20 MiB")
     await owner_lock(db, user_id)
@@ -307,7 +316,7 @@ async def commit(db: AsyncSession, user_id: int, request: CommitRequest):
     # Reviews may refer to a viewing later in the uploaded source order.
     records = sorted(manifest.records, key=lambda r: r.kind == "review")
     for record in records:
-        evidence = record.model_dump(mode="json")
+        evidence = record_evidence(record)
         payload_hash = digest(evidence)
         source = await source_record(db, user_id, manifest, record)
         if source:
@@ -333,9 +342,22 @@ async def commit(db: AsyncSession, user_id: int, request: CommitRequest):
             if record.match_event_id:
                 event = await db.get(WatchEvent, record.match_event_id)
             elif record.kind == "watched_assertion":
-                # A status assertion cannot establish an additional rewatch.
-                event = await db.scalar(select(WatchEvent).where(WatchEvent.user_id == user_id,
-                    WatchEvent.media_id == media.id, WatchEvent.completed.is_(True)).order_by(WatchEvent.id).limit(1))
+                # A status is evidence about media, not a guessed individual
+                # viewing. Reviewed distinct occurrence identities may establish
+                # a lower bound; existing real viewings already satisfy it.
+                completed = await db.scalar(select(func.count()).select_from(WatchEvent).where(
+                    WatchEvent.user_id == user_id, WatchEvent.media_id == media.id,
+                    WatchEvent.completed.is_(True)))
+                deficit = max(0, (record.minimum_known_viewings or 1) - completed)
+                if counts["assertion_projections_created"] + deficit > 2000:
+                    raise HTTPException(413, "Assertion projection count exceeds bounded batch limit")
+                for _ in range(deficit):
+                    db.add(WatchEvent(user_id=user_id, media_id=media.id, completed=True,
+                        play_count=1, source=manifest.source, **temporal_columns(Occurred())))
+                counts["assertion_projections_created"] += deficit
+                counts["media_only_assertions"] += 1
+                await db.flush()
+                continue
             if event is None:
                 event = WatchEvent(user_id=user_id, media_id=media.id, completed=True, play_count=1,
                     source=manifest.source, **temporal_columns(record.occurred))
