@@ -1,15 +1,19 @@
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime
+from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, func, Index
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, func, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
+if TYPE_CHECKING:
+    from .users import User
+    from .media import Media
 
 
 class WatchEvent(Base):
     __tablename__ = "watch_events"
     __table_args__ = (
+        UniqueConstraint("id", "user_id", name="uq_watch_event_owner"),
         Index("idx_watch_events_user_media", "user_id", "media_id"),
         Index("idx_watch_events_user_completed_watched_at", "user_id", "completed", "watched_at"),
     )
@@ -46,6 +50,10 @@ class WatchEvent(Base):
     # before it was tracked. Unlike origin, which only exists to stop a cloud
     # service's push echoing a play back to it, this is purely informational.
     source           : Mapped[Optional[str]]   = mapped_column(String(16), nullable=True)
+    watched_precision: Mapped[str] = mapped_column(String(20), default="legacy", server_default="legacy")
+    watched_on: Mapped[Optional[date]] = mapped_column(Date)
+    watched_local_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    watched_timezone: Mapped[Optional[str]] = mapped_column(String(100))
 
     user  : Mapped["User"]  = relationship(back_populates="watch_events")
     media : Mapped["Media"] = relationship(back_populates="watch_events")

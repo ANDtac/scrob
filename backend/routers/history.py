@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, or_, select, desc, func, delete, case
+from sqlalchemy import and_, or_, select, desc, func, delete, case, cast, DateTime
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload, aliased
 from db import get_db, AsyncSessionLocal
@@ -385,6 +385,10 @@ def format_event(event: WatchEvent | PlaybackProgress, media: Media) -> dict:
         "completed": getattr(event, "completed", False),
         "play_count": getattr(event, "play_count", 1),
         "source": getattr(event, "source", None),
+        "watched_precision": getattr(event, "watched_precision", "legacy"),
+        "watched_on": getattr(event, "watched_on", None),
+        "watched_local_at": getattr(event, "watched_local_at", None),
+        "watched_timezone": getattr(event, "watched_timezone", None),
     }
 
     if media.media_type == MediaType.episode and media.show:
@@ -447,7 +451,7 @@ async def get_history(
         .where(WatchEvent.user_id == current_user.id)
         .where(WatchEvent.completed == True)
         .where(Media.media_type.in_(type_filter))
-        .order_by(WatchEvent.watched_at.desc().nulls_last(), WatchEvent.id.desc())
+        .order_by(func.coalesce(WatchEvent.watched_at, cast(WatchEvent.watched_on, DateTime), WatchEvent.watched_local_at).desc().nulls_last(), WatchEvent.id.desc())
     )
     if search_term:
         query = query.where(

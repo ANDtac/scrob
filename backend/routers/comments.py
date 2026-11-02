@@ -36,6 +36,8 @@ class CommentResponse(BaseModel):
     content: str
     created_at: str
     updated_at: Optional[str] = None
+    source_occurred: Optional[dict] = None
+    watch_event_id: Optional[int] = None
 
 @router.get("")
 async def list_comments(
@@ -94,6 +96,8 @@ async def list_comments(
             "content": c.content,
             "is_spoiler": c.is_spoiler,
             "created_at": c.created_at.isoformat(),
+            "source_occurred": c.source_occurred,
+            "watch_event_id": c.watch_event_id,
             "updated_at": c.updated_at.isoformat() if c.updated_at else None,
             "wetrakr_comment_id": c.wetrakr_comment_id,
             "wetrakr_source": (c.wetrakr_source or "wetrakr") if c.wetrakr_comment_id else None,
@@ -142,6 +146,8 @@ async def create_comment(
         "content": comment.content,
         "is_spoiler": comment.is_spoiler,
         "created_at": comment.created_at.isoformat(),
+        "source_occurred": comment.source_occurred,
+        "watch_event_id": comment.watch_event_id,
     }
 
 @router.patch("/{comment_id}")
@@ -174,6 +180,8 @@ async def update_comment(
         "content": comment.content,
         "is_spoiler": comment.is_spoiler,
         "updated_at": comment.updated_at.isoformat() if comment.updated_at else None,
+        "source_occurred": comment.source_occurred,
+        "watch_event_id": comment.watch_event_id,
     }
 
 @router.delete("/{comment_id}")

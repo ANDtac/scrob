@@ -1,0 +1,5 @@
+FROM node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS node
+FROM bellamy/scrob@sha256:eba40725a340ee4513415462d7cc8b4a95bd0df7d4b38a6ca5c8e355ed1c60d6
+COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && uv pip install --python /app/backend/.venv/bin/python pytest==9.2.0 pytest-asyncio==1.4.1.post1 aiosqlite==0.22.1 ruff==0.17.3

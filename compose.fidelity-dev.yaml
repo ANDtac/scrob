@@ -1,0 +1,27 @@
+services:
+  dev:
+    image: scrob-fidelity-dev:2.37.0-1
+    build:
+      context: .
+      dockerfile: Dockerfile.fidelity-dev
+    container_name: scrob-fidelity-dev
+    entrypoint: ["/bin/sh", "/work/tools/fidelity-dev.sh"]
+    restart: "no"
+    working_dir: /work/backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres@127.0.0.1/fidelity_test
+      SECRET_KEY: synthetic-fidelity-development-only
+      PYTHONPATH: /work/backend
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - .:/work
+      - fidelity-dev-state:/devstate
+      - fidelity-node-modules:/work/frontend/node_modules
+    # No Docker socket, household credentials or production database. UI is loopback only.
+    mem_limit: 2g
+    cpus: 2
+    ports:
+      - "127.0.0.1:17330:7330"
+volumes:
+  fidelity-dev-state:
+  fidelity-node-modules:

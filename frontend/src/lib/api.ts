@@ -260,6 +260,10 @@ export interface WatchEvent {
   media: MediaItem;
   user_id: number;
   watched_at: string | null;
+  watched_precision?: import("./historyTime").Occurred["precision"];
+  watched_on?: string | null;
+  watched_local_at?: string | null;
+  watched_timezone?: string | null;
   completed: boolean;
   progress_percent: number | null;
   source?: string | null;
@@ -1205,6 +1209,8 @@ export interface Comment {
   content: string;
   is_spoiler: boolean;
   created_at: string;
+  source_occurred?: import("./historyTime").Occurred | null;
+  watch_event_id?: number | null;
   updated_at?: string | null;
   wetrakr_comment_id?: number | null;
   wetrakr_source?: string | null;

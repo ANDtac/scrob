@@ -1,0 +1,227 @@
+---
+import Base from "../layouts/Base.astro";
+Astro.response.headers.set("Cache-Control", "no-store");
+---
+
+<Base title="Sources and imports">
+  <main class="max-w-5xl mx-auto space-y-8" id="source-review">
+    <div class="flex flex-wrap justify-between items-center gap-3">
+      <h1 class="page-title">Sources and imports</h1>
+      <a class="text-blue-400 hover:underline" href="/history">Watch history</a>
+    </div>
+    <p class="text-zinc-400">Your private source records preserve original dates, ratings and revisions. Observation and import dates describe when evidence arrived; they are not viewing dates.</p>
+    <nav class="flex flex-wrap gap-4 text-blue-400" aria-label="Import sections">
+      <a href="#precision">Coverage</a><a href="#review-import">Review an import</a><a href="#evidence">Evidence</a><a href="#rating-revisions">Ratings</a><a href="#original-files">Original files</a><a href="#import-batches">Batches</a>
+    </nav>
+    <section id="precision" class="source-panel">
+      <h2 class="section-headline">Date precision and coverage</h2>
+      <p id="precision-status" role="status">Loading…</p>
+      <pre id="precision-data" class="source-json"></pre>
+      <p class="text-sm text-zinc-400">Counts describe stored records, not guaranteed lifetime coverage. Date-only and unknown entries remain separate from exact timestamps.</p>
+      <a href="/api/proxy/imports/v1/export" download="scrob-fidelity.json" class="source-button inline-block">Download complete evidence export</a>
+    </section>
+    <section id="review-import" class="source-panel">
+      <h2 class="section-headline">Review an import</h2>
+      <p class="text-sm text-zinc-400">Choose a prepared import manifest with reviewed media matches. Preview saves a review batch without changing your watch history. Preview counts describe submitted rows and date precision; the commit receipt records actual changes and retained conflicts. Unresolved source rows belong in the original export until their matches are reviewed.</p>
+      <label class="block" for="manifest-file">Prepared JSON manifest</label>
+      <input id="manifest-file" type="file" accept="application/json,.json" class="block w-full" />
+      <div class="flex gap-3"><button id="preview-import" type="button" class="source-button">Preview</button><button id="commit-import" type="button" class="source-button" disabled>Commit reviewed import</button></div>
+      <p id="import-status" role="status" aria-live="polite"></p>
+      <pre id="preview-receipt" class="source-json"></pre>
+      <details><summary class="cursor-pointer text-blue-400">Full prepared manifest</summary><pre id="preview-manifest" class="source-json"></pre></details>
+    </section>
+    <section id="evidence" class="source-panel">
+      <h2 class="section-headline">Source evidence</h2>
+      <p id="evidence-filter" class="text-sm text-zinc-400"></p>
+      <a href="/imports#evidence" class="text-blue-400 hover:underline">All source records</a>
+      <div id="evidence-items" class="space-y-3"></div>
+      <div class="flex gap-3"><button type="button" class="source-button" data-list="evidence" data-direction="-1">Previous</button><button type="button" class="source-button" data-list="evidence" data-direction="1">Next</button><span id="evidence-page" role="status"></span></div>
+    </section>
+    <section id="rating-revisions" class="source-panel">
+      <h2 class="section-headline">Rating revisions</h2>
+      <p class="text-sm text-zinc-400">The selected revision supplies the current rating. Original values and scales are retained. Ambiguous date comparisons keep the existing choice and appear in the import receipt for review.</p>
+      <div id="ratings-items" class="space-y-3"></div>
+      <div class="flex gap-3"><button type="button" class="source-button" data-list="ratings" data-direction="-1">Previous</button><button type="button" class="source-button" data-list="ratings" data-direction="1">Next</button><span id="ratings-page" role="status"></span></div>
+    </section>
+    <section id="original-files" class="source-panel">
+      <h2 class="section-headline">Original source files</h2>
+      <p class="text-sm text-zinc-400">These files can retain unmatched rows that are not yet in your history. Content is displayed as plain text.</p>
+      <div id="artifacts-items" class="space-y-3"></div>
+    </section>
+    <section id="import-batches" class="source-panel">
+      <h2 class="section-headline">Import batches and conflicts</h2>
+      <div id="batches-items" class="space-y-3"></div>
+      <div class="flex gap-3"><button type="button" class="source-button" data-list="batches" data-direction="-1">Previous</button><button type="button" class="source-button" data-list="batches" data-direction="1">Next</button><span id="batches-page" role="status"></span></div>
+    </section>
+  </main>
+</Base>
+
+<style>
+  .source-panel { padding: 1.25rem; border: 1px solid #27272a; border-radius: 1rem; background: #18181b80; display: grid; gap: 1rem; }
+  .source-button { padding: .5rem .8rem; border: 1px solid #3f3f46; border-radius: .5rem; background: #27272a; cursor: pointer; }
+  .source-button:disabled { opacity: .4; cursor: not-allowed; }
+  .source-json { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 32rem; overflow: auto; font-size: .8rem; color: #d4d4d8; }
+</style>
+
+<script>
+  import { formatOccurrence, type Occurred } from "../lib/historyTime";
+
+  type Row = Record<string, any>;
+  type Batch = { batch_id: number; manifest_sha256: string; state_sha256: string; status: string; source: string; account: string; receipt: Record<string, number> };
+  const byId = (id: string) => document.getElementById(id)!;
+  const setText = (id: string, value: unknown) => { byId(id).textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2); };
+  const limit = 50;
+  const offsets: Record<string, number> = { evidence: 0, ratings: 0, batches: 0 };
+  const rawWatchId = new URL(location.href).searchParams.get("watch_event_id");
+  const watchId = rawWatchId && /^[1-9]\d*$/.test(rawWatchId) && Number.isSafeInteger(Number(rawWatchId)) ? Number(rawWatchId) : null;
+  setText("evidence-filter", watchId ? `Evidence linked to original viewing #${watchId}.` : "All records belonging to your signed-in account.");
+
+  async function request(path: string, body?: unknown): Promise<any> {
+    const response = await fetch(`/api/proxy/imports/v1/${path}`, {
+      method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store", redirect: "error",
+      headers: body === undefined ? {} : { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(String(response.status));
+    return response.json();
+  }
+  // Imported strings are always text nodes, never HTML or executable URLs.
+  function detail(title: string, value: unknown): HTMLDetailsElement {
+    const wrapper = document.createElement("details");
+    wrapper.className = "rounded-lg border border-zinc-700 p-3";
+    const summary = document.createElement("summary");
+    summary.className = "cursor-pointer text-blue-300 break-words";
+    summary.textContent = title;
+    const pre = document.createElement("pre");
+    pre.className = "whitespace-pre-wrap break-words overflow-auto max-h-96 text-xs mt-3";
+    pre.textContent = JSON.stringify(value, null, 2);
+    wrapper.append(summary, pre);
+    return wrapper;
+  }
+  const occurredLabel = (value: Occurred | null) => formatOccurrence(value, { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }).fullLabel;
+
+  async function loadList(name: "evidence" | "ratings" | "batches") {
+    const target = byId(`${name}-items`);
+    const previous = document.querySelector<HTMLButtonElement>(`[data-list="${name}"][data-direction="-1"]`)!;
+    const next = document.querySelector<HTMLButtonElement>(`[data-list="${name}"][data-direction="1"]`)!;
+    previous.disabled = next.disabled = true;
+    target.textContent = "Loading…";
+    try {
+      const filter = name === "evidence" && watchId ? `&watch_event_id=${watchId}` : "";
+      const rows: Row[] = await request(`${name}?offset=${offsets[name]}&limit=${limit}${filter}`);
+      target.replaceChildren();
+      if (!rows.length) target.textContent = "No records on this page.";
+      for (const row of rows) {
+        const title = name === "ratings"
+          ? `${row.selected ? "Selected" : "Retained"} · ${row.source} · media #${row.media_id} · ${row.original_value}/${row.original_scale} · ${occurredLabel(row.occurred)}`
+          : name === "batches" ? `Batch #${row.batch_id} · ${row.source} · ${row.status}`
+          : `${row.source} · ${row.kind} · media #${row.media_id} · ${row.versions?.length ?? 0} evidence versions`;
+        const element = detail(title, row);
+        if (name === "batches") {
+          const button = document.createElement("button");
+          button.className = "text-sm text-blue-400 mt-2";
+          button.textContent = "Load full manifest";
+          button.addEventListener("click", async () => {
+            button.disabled = true;
+            try { element.querySelector("pre")!.textContent = JSON.stringify(await request(`batches/${Number(row.batch_id)}`), null, 2); button.remove(); }
+            catch { button.textContent = "Could not load; retry"; button.disabled = false; }
+          });
+          element.append(button);
+        }
+        target.append(element);
+      }
+      previous.disabled = offsets[name] === 0;
+      next.disabled = rows.length < limit;
+      setText(`${name}-page`, `Page ${offsets[name] / limit + 1} · ${rows.length} records`);
+    } catch { target.textContent = "Could not load records. Reload to retry."; }
+  }
+  document.querySelectorAll<HTMLButtonElement>("[data-list]").forEach(button => button.addEventListener("click", () => {
+    const name = button.dataset.list as "evidence" | "ratings" | "batches";
+    offsets[name] = Math.max(0, offsets[name] + Number(button.dataset.direction) * limit);
+    void loadList(name);
+  }));
+
+  async function loadSummary() {
+    try { setText("precision-data", await request("summary")); setText("precision-status", "Your stored evidence"); }
+    catch { setText("precision-status", "Could not load coverage. Reload to retry."); }
+  }
+  async function loadArtifacts() {
+    const target = byId("artifacts-items");
+    try {
+      const rows: Row[] = await request("artifacts");
+      target.replaceChildren();
+      if (!rows.length) target.textContent = "No original source files stored yet.";
+      for (const row of rows) {
+        const element = detail(`${row.source} · ${row.filename}`, row);
+        const download = document.createElement("a");
+        download.href = `/api/proxy/imports/v1/artifacts/${Number(row.id)}`;
+        download.download = "source-artifact.txt";
+        download.textContent = "Download original text";
+        download.className = "text-blue-400 text-sm block mt-2";
+        const view = document.createElement("button");
+        view.textContent = "View full original text";
+        view.className = "text-blue-400 text-sm block mt-2";
+        view.addEventListener("click", async () => {
+          view.disabled = true;
+          try {
+            const response = await fetch(download.href, { credentials: "same-origin", cache: "no-store", redirect: "error" });
+            if (!response.ok) throw new Error("unavailable");
+            const pre = document.createElement("pre");
+            pre.className = "whitespace-pre-wrap break-words text-xs max-h-96 overflow-auto mt-3";
+            pre.textContent = await response.text();
+            element.append(pre); view.remove();
+          } catch { view.textContent = "Could not load; retry"; view.disabled = false; }
+        });
+        element.append(download, view); target.append(element);
+      }
+    } catch { target.textContent = "Could not load original files. Reload to retry."; }
+  }
+
+  const fileInput = byId("manifest-file") as HTMLInputElement;
+  const previewButton = byId("preview-import") as HTMLButtonElement;
+  const commitButton = byId("commit-import") as HTMLButtonElement;
+  let preview: Batch | null = null;
+  let generation = 0;
+  function invalidate() { generation++; preview = null; commitButton.disabled = true; setText("preview-receipt", ""); setText("preview-manifest", ""); setText("import-status", ""); }
+  fileInput.addEventListener("change", invalidate);
+  previewButton.addEventListener("click", async () => {
+    invalidate();
+    const attempt = generation;
+    const file = fileInput.files?.[0];
+    if (!file || file.size > 20_000_000) { setText("import-status", "Choose a prepared JSON manifest smaller than 20 MB."); return; }
+    previewButton.disabled = true;
+    try {
+      const manifest = JSON.parse(await file.text());
+      const result: Batch = await request("preview", manifest);
+      if (generation !== attempt) return;
+      preview = result;
+      setText("preview-receipt", result);
+      setText("preview-manifest", manifest);
+      setText("import-status", result.status === "committed" ? "This batch is already committed; no new import is needed." : "Preview saved. Review the complete manifest and receipt before committing.");
+      commitButton.disabled = result.status !== "preview";
+    } catch (error) {
+      if (generation === attempt) setText("import-status", error instanceof Error && error.message === "409" ? "Preview conflict. Review the source and its idempotency key." : "Preview failed. Check the manifest format, reviewed matches, and signed-in account.");
+    } finally { previewButton.disabled = false; }
+  });
+  commitButton.addEventListener("click", async () => {
+    const reviewed = preview;
+    if (!reviewed) return;
+    const confirm = (window as any).showConfirm;
+    const accepted = confirm
+      ? await confirm("Commit this reviewed import?", `This applies batch #${reviewed.batch_id} to your signed-in account. Review its source rows and date precision first.`)
+      : window.confirm(`Commit reviewed batch #${reviewed.batch_id} to your account?`);
+    if (!accepted || reviewed !== preview) return;
+    commitButton.disabled = previewButton.disabled = fileInput.disabled = true;
+    try {
+      const result = await request("commit", { batch_id: reviewed.batch_id, manifest_sha256: reviewed.manifest_sha256, state_sha256: reviewed.state_sha256 });
+      setText("preview-receipt", result);
+      setText("import-status", "Import committed. The receipt records actual changes and any conflicts retained for review.");
+      preview = null;
+      await Promise.all([loadSummary(), loadList("evidence"), loadList("ratings"), loadList("batches")]);
+    } catch (error) {
+      preview = null;
+      setText("import-status", error instanceof Error && error.message === "409" ? "History or the preview changed. Preview again before committing." : "Commit could not be confirmed. Preview the same manifest again to check the batch safely.");
+    } finally { previewButton.disabled = fileInput.disabled = false; }
+  });
+  void Promise.all([loadSummary(), loadList("evidence"), loadList("ratings"), loadList("batches"), loadArtifacts()]);
+</script>

@@ -10,6 +10,7 @@ Endpoints:
 """
 
 import asyncio
+from typing import Coroutine
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -461,11 +462,21 @@ def _apply_imported_rating(
     item: dict,
     existing: dict[tuple[int, int | None], Rating],
     changed: RatingChanges,
+    source: str = "trakt",
 ) -> bool:
     rating_value = float(item["rating"])
     rated_at = _trakt_rated_at(item.get("rated_at"))
     key = (media.id, season_number)
     current = existing.get(key)
+    raw_date = item.get("rated_at")
+    occurrence = {"precision": "unknown", "value": None}
+    if raw_date:
+        parsed_source = datetime.fromisoformat(str(raw_date).replace("Z", "+00:00"))
+        occurrence = {"precision": "date" if len(str(raw_date)) == 10 else "instant" if parsed_source.tzinfo else "local_datetime", "value": str(raw_date)}
+    if current:
+        current._fidelity_source = source
+        current._fidelity_occurred = occurrence
+        current._fidelity_review = item.get("review")
     if current and current.rating == rating_value:
         current.rated_at = rated_at
         return False
@@ -481,6 +492,9 @@ def _apply_imported_rating(
             rated_at=rated_at,
         )
         db.add(current)
+        current._fidelity_source = source
+        current._fidelity_occurred = occurrence
+        current._fidelity_review = item.get("review")
         existing[key] = current
     changed[key] = rating_value
     return True

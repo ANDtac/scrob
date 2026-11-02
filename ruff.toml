@@ -1,0 +1,6 @@
+# Keep this fork's lint gate narrow enough for the unchanged upstream tree.
+# Import/style cleanup is restricted to newly introduced fidelity modules.
+target-version = "py312"
+line-length = 120
+[lint]
+select = ["E9", "F63", "F7", "F82"]

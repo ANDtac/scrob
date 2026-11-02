@@ -1,18 +1,25 @@
 from datetime import datetime
-from typing import Optional
-from sqlalchemy import BigInteger, Integer, String, Text, Boolean, ForeignKey, DateTime, func, Index
+from typing import Optional, TYPE_CHECKING
+from sqlalchemy import BigInteger, Integer, String, Text, Boolean, ForeignKey, ForeignKeyConstraint, UniqueConstraint, DateTime, func, Index
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
+if TYPE_CHECKING:
+    from .users import User
 
 class Comment(Base):
     __tablename__ = "comments"
     __table_args__ = (
+        UniqueConstraint("id", "user_id", name="uq_comment_owner"),
+        ForeignKeyConstraint(["watch_event_id", "user_id"], ["watch_events.id", "watch_events.user_id"]),
         Index("idx_comments_media", "media_type", "tmdb_id", "season_number", "episode_number"),
         Index("idx_comments_tvdb", "media_type", "tvdb_id", "season_number", "episode_number"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    watch_event_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+    source_occurred: Mapped[Optional[dict]] = mapped_column(JSONB)
 
     # Generic entity referencing
     media_type: Mapped[str] = mapped_column(String(50), nullable=False) # 'movie', 'series', 'season', 'episode', 'person'

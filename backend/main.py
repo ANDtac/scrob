@@ -10,6 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db import engine, Base
 import models # noqa: F401
 from routers import webhooks, media, history, ratings, sync, shows, auth, lists, oidc, profile, trakt, simkl, wetrakr, mdblist, bingebase, comments, admin, compat, export, yamtrack, calendar, saved_filters
+from routers import fidelity
+from core.fidelity_ratings import install as install_rating_revisions
+install_rating_revisions()
 
 from core.access_log import install as install_access_log_redaction
 install_access_log_redaction()
@@ -890,6 +893,7 @@ app.include_router(export.router, prefix="/export", tags=["export"])
 app.include_router(yamtrack.router, prefix="/yamtrack", tags=["yamtrack"])
 app.include_router(calendar.router, prefix="/calendar", tags=["calendar"])
 app.include_router(saved_filters.router, prefix="/saved-filters", tags=["saved-filters"])
+app.include_router(fidelity.router, prefix="/imports/v1", tags=["historical-evidence"])
 app.include_router(compat.router, tags=["compat"])
 
 @app.get("/health")

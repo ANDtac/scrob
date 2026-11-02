@@ -414,7 +414,7 @@ async def apply_scrob_import(
                             if not media:
                                 stats["skipped"] += 1
                                 continue
-                            if _apply_imported_rating(db, user_id, media, season_number, entry, existing_ratings, _new_ratings):
+                            if _apply_imported_rating(db, user_id, media, season_number, entry, existing_ratings, _new_ratings, source="scrob"):
                                 stats["ratings"] += 1
                             else:
                                 stats["skipped"] += 1

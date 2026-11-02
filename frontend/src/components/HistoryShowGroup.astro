@@ -11,6 +11,7 @@ import { episodeHref } from "../lib/episodeHref";
 import { episodeCode, watchSourceLabel } from "../lib/media-format";
 import { watchSourceIconHtml } from "../lib/connectionIcons";
 import { getViewerTimeZone } from "../lib/viewerTimeZone";
+import { formatOccurrence, watchOccurrence } from "../lib/historyTime";
 
 interface Props {
   events: WatchEvent[];
@@ -25,18 +26,16 @@ const posterPath = ratingPosterUrl(tmdbImageUrl(rawPoster, "w500"), first, Astro
 
 const timeZone = getViewerTimeZone(Astro.cookies);
 
-function fmtTime(watchedAt: string | null): string | null {
-  return watchedAt
-    ? new Date(watchedAt + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: !use24h, timeZone })
-    : null;
+function fmtTime(event: WatchEvent): string {
+  return formatOccurrence(watchOccurrence(event), { timeZone, use24h }).timeLabel;
 }
 
 // events arrive newest-first (matches the page's own ordering); the
 // expanded list and the time range both read oldest -> newest instead,
 // matching watch order.
 const chronological = [...events].reverse();
-const startTime = fmtTime(chronological[0].watched_at);
-const endTime = fmtTime(chronological[chronological.length - 1].watched_at);
+const startTime = fmtTime(chronological[0]);
+const endTime = fmtTime(chronological[chronological.length - 1]);
 const timeLabel = !startTime || !endTime
   ? 'Unknown'
   : startTime === endTime ? startTime : `${startTime} – ${endTime}`;
@@ -85,7 +84,7 @@ const codes = chronological.map((e) => episodeCode(e.media)).filter((c): c is st
     {chronological.map((event) => {
       const media = event.media;
       const href = episodeHref(media);
-      const time = fmtTime(event.watched_at) ?? 'Unknown';
+      const time = fmtTime(event);
       const code = episodeCode(media);
       const sourceLabel = watchSourceLabel(event.source);
       const sourceIcon = watchSourceIconHtml(event.source);
@@ -107,6 +106,7 @@ const codes = chronological.map((e) => episodeCode(e.media)).filter((c): c is st
               {sourceIcon ? <Fragment set:html={sourceIcon} /> : sourceLabel}
             </span>
           )}
+          <a href={`/imports?watch_event_id=${event.id}`} class="text-xs text-blue-400 hover:underline">Evidence</a>
           <button
             class="delete-history-event w-7 h-7 shrink-0 rounded-lg flex items-center justify-center bg-zinc-950/50 border border-zinc-800 text-zinc-500 hover:text-red-400 hover:border-red-500/40 hover:bg-red-500/10 transition-all duration-200 cursor-pointer"
             title="Delete this entry"
@@ -156,6 +156,7 @@ const codes = chronological.map((e) => episodeCode(e.media)).filter((c): c is st
     document.addEventListener('click', async (e) => {
       const card = (e.target as HTMLElement).closest<HTMLElement>('[data-event-id]');
       if (!card) return;
+      if ((e.target as HTMLElement).closest('a')) return;
 
       const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.delete-history-event');
       if (!btn) {

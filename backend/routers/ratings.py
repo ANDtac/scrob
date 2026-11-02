@@ -148,6 +148,7 @@ async def submit_rating(
         )
         db.add(rating)
 
+    rating._fidelity_source = "manual"
     await db.commit()
     await db.refresh(rating)
     # A rating made under a non-aired ordering isn't pushed to external

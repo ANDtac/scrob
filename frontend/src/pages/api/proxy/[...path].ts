@@ -106,6 +106,10 @@ async function handle({ params, request }: Parameters<APIRoute>[0]): Promise<Res
     const v = res.headers.get(h);
     if (v) responseHeaders.set(h, v);
   }
+  if (path.startsWith("imports/v1/")) {
+    responseHeaders.set("Cache-Control", "no-store");
+    responseHeaders.set("X-Content-Type-Options", "nosniff");
+  }
 
   return new Response(res.body, { status: res.status, headers: responseHeaders });
 }
