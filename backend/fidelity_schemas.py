@@ -138,3 +138,19 @@ class SourceArtifactUpload(StrictModel):
     media_type: Literal["application/json", "text/csv", "text/plain"]
     # Original UTF-8 bytes, retained verbatim including line endings.
     content: str = Field(max_length=20_000_000)
+
+
+class StatusReconciliation(StrictModel):
+    """Explicit legacy status projections to preserve as non-viewing evidence."""
+    idempotency_key: str = Field(min_length=1, max_length=128)
+    account: str = Field(min_length=1, max_length=255)
+    trakt_account: str = Field(min_length=1, max_length=255)
+    artifact_id: int = Field(gt=0)
+    artifact_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    event_ids: list[int] = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def unique_events(self):
+        if any(event <= 0 for event in self.event_ids) or len(set(self.event_ids)) != len(self.event_ids):
+            raise ValueError("event IDs must be unique positive integers")
+        return self

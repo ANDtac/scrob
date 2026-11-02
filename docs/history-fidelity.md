@@ -104,3 +104,29 @@ pre-upgrade database/configuration and the original image together; an old image
 cannot simply run over the new Alembic head. Preserve newer evidence before any
 rollback. Household operating paths and live deployment acceptance belong in the
 HomeLab runbook, outside this source repository.
+# Legacy status reconciliation
+
+The private `POST /imports/v1/status-reconciliation/preview` and `/commit`
+endpoints deliberately remove redundant imported Stremio status projections
+after separately verified Trakt viewing events exist for the same canonical
+media. This is not a timestamp or individual-viewing match.
+
+The preview requires an owner-scoped original JSON artifact with format
+`scrob-status-projections`, `user_id`, and the exact original `watch_events`
+rows; its artifact ID and SHA256, explicit event IDs, source and Trakt account
+names, and an idempotency key are mandatory. Only completed, unchanged legacy
+Stremio rows with no review, source or active-rewatch references qualify.
+Commit uses the preview's batch/manifest/state hashes and rechecks everything
+under owner and writer locks. The original row becomes an immutable
+`watched_assertion` source version associated with media, with unknown actual
+occurrence precision and no arbitrary viewing link. Its original timestamp
+and every other field remain in the payload and original artifact. The
+receipt distinguishes removed projections from preserved source assertions.
+
+Repeated commits return the original receipt. Playback positions, collections,
+ratings, other owners and outbound integrations are untouched. Nuvio inbound
+pulls suppress only exact millisecond timestamps archived by a committed
+reconciliation, preventing migrated status snapshots from reappearing as new
+plays. New timestamps continue to import; unknown timestamps are not suppressed.
+The normal evidence/batch/export interfaces include all reconciliation data.
+No schema migration is needed beyond `hfidelity2`.

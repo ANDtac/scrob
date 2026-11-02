@@ -713,6 +713,7 @@ class NuvioWatchHistoryTests(unittest.IsolatedAsyncioTestCase):
                 side_effect=[
                     _Result(scalars=[movie]),
                     _Result(rows=[]),
+                    _Result(rows=[]),  # no archived status timestamps
                     _Result(),  # get_dedup_window_minutes lookup (#390)
                     # record_rewatch_progress's own Media lookup, once per new
                     # WatchEvent (2 distinct timestamps below) - no-ops since

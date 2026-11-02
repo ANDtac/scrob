@@ -8,9 +8,9 @@ RUN npm run build
 
 FROM bellamy/scrob@sha256:eba40725a340ee4513415462d7cc8b4a95bd0df7d4b38a6ca5c8e355ed1c60d6
 ARG SOURCE_REVISION=uncommitted
-ENV APP_VERSION=2.37.0-household.1
+ENV APP_VERSION=2.37.0-household.2
 LABEL org.opencontainers.image.source="https://github.com/ANDtac/scrob" \
-      org.opencontainers.image.version="2.37.0-household.1" \
+      org.opencontainers.image.version="2.37.0-household.2" \
       org.opencontainers.image.revision=$SOURCE_REVISION
 COPY backend/ /app/backend/
 COPY --from=frontend /build/frontend/dist/ /app/frontend/dist/

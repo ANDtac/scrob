@@ -1,11 +1,11 @@
 """Private, authenticated import/evidence endpoints. No user-id override."""
 import hashlib
 
-from core import fidelity
+from core import fidelity, fidelity_reconcile
 from db import get_db
 from dependencies import get_current_user
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from fidelity_schemas import CommitRequest, ImportManifest, SourceArtifactUpload
+from fidelity_schemas import CommitRequest, ImportManifest, SourceArtifactUpload, StatusReconciliation
 from models import (
     ImportBatch,
     Rating,
@@ -97,6 +97,30 @@ async def commit(body: CommitRequest, db: AsyncSession = Depends(get_db), user: 
         # SQL/driver exceptions can contain raw bound source rows. Do not send
         # or log those payloads as an unhandled traceback.
         raise HTTPException(409, "Import transaction failed; no changes committed") from None
+
+
+@router.post("/status-reconciliation/preview")
+async def reconcile_preview(body: StatusReconciliation, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    try:
+        return await fidelity_reconcile.preview(db, user.id, body)
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception:
+        await db.rollback()
+        raise HTTPException(409, "Status reconciliation preview failed; no changes committed") from None
+
+
+@router.post("/status-reconciliation/commit")
+async def reconcile_commit(body: CommitRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    try:
+        return await fidelity_reconcile.commit(db, user.id, body)
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception:
+        await db.rollback()
+        raise HTTPException(409, "Status reconciliation failed; no changes committed") from None
 
 
 @router.get("/batches")

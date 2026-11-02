@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import re
 from typing import Any
@@ -1150,7 +1151,6 @@ async def _fan_out_changes_to_other_connections(
             for source_id, connection_id, media_id in files_result.all():
                 source_ids_map.setdefault((connection_id, media_id), []).append(source_id)
 
-        import httpx as _httpx
         sem = asyncio.Semaphore(20)
 
         async def _guarded(coro):
@@ -3913,7 +3913,7 @@ async def _reconcile_plex_watchlist(user_id: int, connection_id: int, tmdb_api_k
                 )
                 baseline = baseline_result.scalar_one_or_none()
 
-                print(f"  Fetching Plex watchlist...")
+                print("  Fetching Plex watchlist...")
                 remote_items = await plex.get_watchlist(conn.plex_account_token)
                 print(f"  {len(remote_items)} items in Plex watchlist")
                 remote_by_key = _plex_watchlist_remote_map(remote_items)
@@ -4023,7 +4023,7 @@ async def _run_plex_sync(user_id: int, job_id: int, movie_limit: int, show_limit
             # itself, which still gates the (correct) backfill call further down.
             plex_watched_state_is_reliable = conn.sync_watched and not conn.server_username
 
-            print(f"  Fetching Plex libraries...")
+            print("  Fetching Plex libraries...")
             libraries = await plex.get_libraries(p_url, p_token)
 
             sel_result = await db.execute(
@@ -4613,10 +4613,17 @@ async def _apply_nuvio_watch_history(
         for existing_media_id, existing_watched_at in existing_result.all():
             existing_by_media.setdefault(existing_media_id, []).append(existing_watched_at)
 
+    # A controlled historical reconciliation may preserve a migrated Cloud
+    # status as evidence instead of counting it as a separate viewing. Suppress
+    # only those exact archived transport timestamps; newer activity still flows.
+    from core.fidelity_reconcile import cloud_milliseconds, preserved_status_times
+    status_times = await preserved_status_times(db, user_id, media_ids) if source == "nuvio" else {}
     window_minutes = await get_dedup_window_minutes(db, user_id)
     added_media_ids: set[int] = set()
     new_events: list[WatchEvent] = []
     for media, watched_at in candidates:
+        if cloud_milliseconds(watched_at) in status_times.get(media.id, set()):
+            continue
         times = existing_by_media.get(media.id, [])
         if dedupe_by_media_id_only:
             if times:
@@ -5480,7 +5487,7 @@ async def _run_stremio_sync(
                 if complete_snapshot and conn.sync_collection
                 else None
             )
-            removed_collected_ids = await _remove_stremio_collection_sources(
+            await _remove_stremio_collection_sources(
                 db,
                 user_id,
                 conn.id,
@@ -8315,7 +8322,7 @@ async def match_unmatched_show(
     if not body.tmdb_id and not body.tvdb_id:
         raise HTTPException(status_code=400, detail="Either tmdb_id or tvdb_id is required")
 
-    from sqlalchemy import cast as sa_cast, Text as SAText, func as sa_func
+    from sqlalchemy import func as sa_func
 
     ep_result = await db.execute(
         select(Media)
@@ -9282,7 +9289,6 @@ async def list_matched_shows(
     2. SyncJob warnings with matched:true (covers shows where show_title is absent from
        tmdb_data, e.g. episodes that weren't created as stubs or had tmdb_data overwritten).
     """
-    from sqlalchemy import func as sa_func
 
     # Fetch all shows in the system to build a db_id -> Show mapping
     # This allows us to map any database show.id to its tmdb_id dynamically,
